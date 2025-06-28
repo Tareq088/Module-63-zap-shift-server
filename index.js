@@ -38,10 +38,9 @@ async function run() {
           .find(filter)
           .sort({ createdAt: -1 }) // Newest first
           .toArray();
-
-        res.status(200).json(parcels);
+        res.status(200).send(parcels);
       } catch (err) {
-        res.status(500).json({ error: 'Internal Server Error' });
+        res.status(500).send({ error: 'Internal Server Error' });
       }
     });
 
@@ -57,6 +56,52 @@ async function run() {
         res.status(500).json({ error: 'Internal server error' });
       }
     });
+   app.get('/parcels/:id', async (req, res) => {
+  try {
+    const id = req.params.id;
+
+    // Check for valid MongoDB ObjectId
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({ error: 'Invalid parcel ID' });
+    }
+
+    const parcel = await parcelCollection.findOne({ _id: new ObjectId(id) });
+
+    if (!parcel) {
+      return res.status(404).json({ error: 'Parcel not found' });
+    }
+
+    res.json(parcel);
+  } catch (error) {
+    console.error('Error fetching parcel by ID:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+   });
+    // DELETE a parcel by ID
+  app.delete('/parcels/:id', async (req, res) => {
+    try {
+      const id = req.params.id;
+      const result = await parcelCollection.deleteOne({ _id: new ObjectId(id) });
+      res.send(result);
+
+    } catch (error) {
+      console.error('Error deleting parcel:', error);
+      res.status(500).send({ message: 'Internal server error' });
+    }
+  }); 
+  app.post('/create-payment-intent', async (req, res) => {
+    try {
+      const paymentIntent = await stripe.paymentIntents.create({
+        amount: 1000, // Amount in cents
+        currency: 'usd',
+        payment_method_types: ['card'],
+      });
+
+      res.json({ clientSecret: paymentIntent.client_secret });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
 
     // Send a ping to confirm a successful connection
     console.log("Pinged your deployment. You successfully connected to MongoDB!");
