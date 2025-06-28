@@ -3,6 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const { MongoClient, ServerApiVersion,ObjectId } = require('mongodb');
 const app = express();
+const stripe = require('stripe')(process.env.PAYMENT_GATEWAY_KEY);
 const port = process.env.PORT || 5000;
 
         //middleware
@@ -26,6 +27,7 @@ async function run() {
   try {
     const db = client.db('parcelService');
     const parcelCollection = db.collection('parcels');
+    const paymentCollection = db.collection('payments')
     app.get('/parcels', async (req, res) => {
       try {
         const { email } = req.query;
@@ -89,10 +91,70 @@ async function run() {
       res.status(500).send({ message: 'Internal server error' });
     }
   }); 
+  app.post('/payments', async (req, res) => {
+  try {
+    const { parcelId, amount, created_by, payment_method, transaction_id } = req.body;
+    console.log(req.body)
+    const paidAtTime = new Date();
+    // 1. Update parcel: mark as paid and set paidAtTime
+    const updateResult = await parcelCollection.updateOne(
+      { _id: new ObjectId(parcelId) },
+      {
+        $set: {
+          payment_status: 'paid',
+          paidAtTime,
+        }
+      }
+    );
+
+    if (updateResult.modifiedCount === 0) {
+      return res.status(404).json({ error: 'Parcel not found or already paid' });
+    }
+
+    // 2. Insert into payment history
+    const paymentDoc = {
+      parcelId: new ObjectId(parcelId),
+      amount,
+      created_by,
+      payment_method,
+      transaction_id,
+      paidAtTimeString:paidAtTime.toISOString(),
+      paidAtTime, // store the same value for consistency
+    };
+    const result = await paymentCollection.insertOne(paymentDoc);
+    res.status(200).send({
+      message: 'Payment recorded, parcel updated',
+      insertedId: result.insertedId,
+    });
+  } catch (error) {
+    console.error('Payment processing error:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+  });
+  app.get('/payments', async (req, res) => {
+  try {
+    const { email } = req.query;
+
+    const filter = email ? { created_by: email } : {};
+    const payments = await paymentCollection
+      .find(filter)
+      .sort({ paidAtTime: -1 })
+      .toArray();
+    res.json(payments);
+  } catch (error) {
+    console.error('Error fetching payment history:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+  });
+
+
+
   app.post('/create-payment-intent', async (req, res) => {
+            
+    const {amountInCents,parcelI} = req.body;
     try {
       const paymentIntent = await stripe.paymentIntents.create({
-        amount: 1000, // Amount in cents
+        amount: amountInCents, // Amount in cents
         currency: 'usd',
         payment_method_types: ['card'],
       });
