@@ -12,7 +12,7 @@ app.use(cors());
 app.use(express.json());
 
                 // firebase admin key for jwt
-var serviceAccount = require("firebase-adminSdk.json");
+var serviceAccount = require("./firebase-adminSdk.json");
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount)
 });
@@ -57,6 +57,7 @@ const verifyEmail = (req,res,next) =>{
 async function run() {
   try {
     const db = client.db("parcelService");
+    const ridesCollection = db.collection("riders");
     const usersCollection = db.collection("users");
     const parcelCollection = db.collection("parcels");
     const paymentCollection = db.collection("payments");
@@ -144,6 +145,11 @@ async function run() {
         res.status(500).send({ message: "Internal server error" });
       }
     });
+    app.post("/riders", async(req,res)=>{
+      const ridersData = req.body;
+      const result = await ridesCollection.insertOne(ridersData);
+      res.send(result);
+    })
     app.post("/tracking", async (req, res) => {
       try {
         const { trackingId, parcelId, status, location } = req.body;
