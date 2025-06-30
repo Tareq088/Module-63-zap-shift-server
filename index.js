@@ -11,12 +11,11 @@ const port = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json());
 
-                // firebase admin key for jwt
+// firebase admin key for jwt
 var serviceAccount = require("./firebase-adminSdk.json");
 admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount)
+  credential: admin.credential.cert(serviceAccount),
 });
-
 
 //mongo db er coder copy,paste
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.taikvqz.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
@@ -29,58 +28,58 @@ const client = new MongoClient(uri, {
     deprecationErrors: true,
   },
 });
-            // firebase jwt middleware
-const verifyFbToken = async(req,res,next) =>{
-  console.log("headers in middleware",req.headers.authorization);
+// firebase jwt middleware
+const verifyFbToken = async (req, res, next) => {
+  console.log("headers in middleware", req.headers.authorization);
   const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).send({ error: 'Unauthorized: No token' });
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return res.status(401).send({ error: "Unauthorized: No token" });
   }
-   const token = authHeader.split(' ')[1];
-     try {
-      const decodedUser = await admin.auth().verifyIdToken(token);
-      req.decoded = decodedUser;
-      console.log(req.decoded)
-      next();
-    } catch (error) {
-      console.error('Token verification failed:', error);
-      return res.status(403).send({ error: 'Forbidden: Invalid token' });
-    }
-}
-const verifyEmail = (req,res,next) =>{
-  if(req.decoded.email != req.query.email){
-      return res.status(403).send({ error: 'Access denied' });
-    }
+  const token = authHeader.split(" ")[1];
+  try {
+    const decodedUser = await admin.auth().verifyIdToken(token);
+    req.decoded = decodedUser;
+    console.log(req.decoded);
+    next();
+  } catch (error) {
+    console.error("Token verification failed:", error);
+    return res.status(403).send({ error: "Forbidden: Invalid token" });
+  }
+};
+const verifyEmail = (req, res, next) => {
+  if (req.decoded.email != req.query.email) {
+    return res.status(403).send({ error: "Access denied" });
+  }
   next();
-}
+};
 
 async function run() {
   try {
     const db = client.db("parcelService");
-    const ridesCollection = db.collection("riders");
+    const ridersCollection = db.collection("riders");
     const usersCollection = db.collection("users");
     const parcelCollection = db.collection("parcels");
     const paymentCollection = db.collection("payments");
 
-    app.post("/users", async(req,res)=>{
+    app.post("/users", async (req, res) => {
       const email = req.body.email;
-      const userExists = await usersCollection.findOne({email});
-      if(userExists){
-              //update last login time
+      const userExists = await usersCollection.findOne({ email });
+      if (userExists) {
+        //update last login time
         const updateResult = await usersCollection.updateOne(
-            {email: email},
-            {$set: {last_log_In: new Date().toISOString()}},
-            {upsert:true})
-        return res.status(200).send({ message: 'User already exists' });
+          { email: email },
+          { $set: { last_log_In: new Date().toISOString() } },
+          { upsert: true }
+        );
+        return res.status(200).send({ message: "User already exists" });
       }
       const user = req.body;
       const result = await usersCollection.insertOne(user);
-      res.send(result)
-    })
+      res.send(result);
+    });
 
     app.get("/parcels", async (req, res) => {
       try {
-        
         const { email } = req.query;
         const filter = {};
         // If email is provided, filter by created_by field
@@ -145,11 +144,48 @@ async function run() {
         res.status(500).send({ message: "Internal server error" });
       }
     });
-    app.post("/riders", async(req,res)=>{
+    app.post("/riders", async (req, res) => {
       const ridersData = req.body;
-      const result = await ridesCollection.insertOne(ridersData);
+      const result = await ridersCollection.insertOne(ridersData);
       res.send(result);
-    })
+    });
+    // Assuming Express and MongoDB are already connected
+
+    app.get("/riders/pending", async (req, res) => {
+      try {
+        const pendingRiders = await ridersCollection
+          .find({ status: "pending" })
+          .toArray();
+        res.send(pendingRiders);
+      } catch (error) {
+        res
+          .status(500)
+          .send({ message: "Failed to fetch pending riders", error });
+      }
+    });
+    // GET /api/riders?status=approved
+    app.get("/riders/approved", async (req, res) => {
+      const { status } = req.query;
+      try {
+        const query = status ? { status } : {};
+        const riders = await ridersCollection.find(query).toArray();
+        res.send(riders);
+      } catch (err) {
+        console.error("Failed to fetch riders:", err);
+        res.status(500).send({ error: "Internal Server Error" });
+      }
+    });
+    // Approve or cancel rider
+    app.patch("/riders/status/:id", async (req, res) => {
+      const { id } = req.params;
+      const { status } = req.body;
+      const result = await ridersCollection.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: { status } }
+      );
+      res.send(result);
+    });
+
     app.post("/tracking", async (req, res) => {
       try {
         const { trackingId, parcelId, status, location } = req.body;
