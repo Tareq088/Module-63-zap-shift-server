@@ -77,6 +77,45 @@ async function run() {
       const result = await usersCollection.insertOne(user);
       res.send(result);
     });
+    // 🔍 Search users by partial email (case-insensitive)
+    app.get("/users/search", async (req, res) => {
+      const { email } = req.query;
+      if (!email) return res.status(400).send({ error: "Email required" });
+      const users = await usersCollection
+        .find({ email: { $regex: email, $options: "i" } }) // i = case-insensitive
+        .project({ email: 1, role: 1, createdAt: 1, lastLogin: 1 }) // only return needed fields
+        .limit(10) // optional: limit for autocomplete
+        .toArray();
+
+      res.send(users);
+    });
+    const { ObjectId } = require("mongodb");
+
+    app.patch("/users/role/:id", async (req, res) => {
+      try {
+        const { id } = req.params;
+        const { role } = req.body;
+        if (!role) {
+          return res.status(400).json({ message: "New role is required" });
+        }
+        const result = await usersCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $set: { role } }
+        );
+        if (result.modifiedCount > 0) {
+          return res
+            .status(200)
+            .json({ message: `User role updated to ${role}` });
+        } else {
+          return res
+            .status(404)
+            .json({ message: "User not found or role unchanged" });
+        }
+      } catch (error) {
+        console.error("❌ Failed to update user role:", error);
+        return res.status(500).json({ message: "Internal server error" });
+      }
+    });
 
     app.get("/parcels", async (req, res) => {
       try {
@@ -178,11 +217,25 @@ async function run() {
     // Approve or cancel rider
     app.patch("/riders/status/:id", async (req, res) => {
       const { id } = req.params;
-      const { status } = req.body;
+      const { status, email } = req.body;
       const result = await ridersCollection.updateOne(
         { _id: new ObjectId(id) },
         { $set: { status } }
       );
+      //update user role = "rider" whose status is "approved"
+      if (status === "approved") {
+        const userQuery = { email };
+        const updateDoc = {
+          $set: {
+            role: "rider",
+          },
+        };
+        const updateUsersRole = await usersCollection.updateOne(
+          userQuery,
+          updateDoc
+        );
+        console.log(updateUsersRole.modifiedCount);
+      }
       res.send(result);
     });
 
