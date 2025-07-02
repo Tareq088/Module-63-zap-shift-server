@@ -28,30 +28,6 @@ const client = new MongoClient(uri, {
     deprecationErrors: true,
   },
 });
-// firebase jwt middleware
-const verifyFbToken = async (req, res, next) => {
-  console.log("headers in middleware", req.headers.authorization);
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    return res.status(401).send({ error: "Unauthorized: No token" });
-  }
-  const token = authHeader.split(" ")[1];
-  try {
-    const decodedUser = await admin.auth().verifyIdToken(token);
-    req.decoded = decodedUser;
-    console.log(req.decoded);
-    next();
-  } catch (error) {
-    console.error("Token verification failed:", error);
-    return res.status(403).send({ error: "Forbidden: Invalid token" });
-  }
-};
-const verifyEmail = (req, res, next) => {
-  if (req.decoded.email != req.query.email) {
-    return res.status(403).send({ error: "Access denied" });
-  }
-  next();
-};
 
 async function run() {
   try {
@@ -60,6 +36,38 @@ async function run() {
     const usersCollection = db.collection("users");
     const parcelCollection = db.collection("parcels");
     const paymentCollection = db.collection("payments");
+    // firebase jwt middleware
+    const verifyFbToken = async (req, res, next) => {
+      console.log("headers in middleware", req.headers.authorization);
+      const authHeader = req.headers.authorization;
+      if (!authHeader || !authHeader.startsWith("Bearer ")) {
+        return res.status(401).send({ error: "Unauthorized: No token" });
+      }
+      const token = authHeader.split(" ")[1];
+      try {
+        const decodedUser = await admin.auth().verifyIdToken(token);
+        req.decoded = decodedUser;
+        // console.log(req.decoded);
+        next();
+      } catch (error) {
+        console.error("Token verification failed:", error);
+        return res.status(403).send({ error: "Forbidden: Invalid token" });
+      }
+    };
+    const verifyEmail = (req, res, next) => {
+      if (req.decoded.email != req.query.email) {
+        return res.status(403).send({ error: "Access denied" });
+      }
+      next();
+    };
+    const verifyAdmin = async (req, res, next) => {
+      const email = req.decoded.email;
+      const user = await usersCollection.findOne({ email });
+      if (!user || user.role !== "admin") {
+        return res.status(403).send({ message: "forbidden access" });
+      }
+      next();
+    };
 
     app.post("/users", async (req, res) => {
       const email = req.body.email;
@@ -78,7 +86,7 @@ async function run() {
       res.send(result);
     });
     // 🔍 Search users by partial email (case-insensitive)
-    app.get("/users/search", async (req, res) => {
+    app.get("/users/search", verifyFbToken, verifyAdmin, async (req, res) => {
       const { email } = req.query;
       if (!email) return res.status(400).send({ error: "Email required" });
       const users = await usersCollection
@@ -89,33 +97,50 @@ async function run() {
 
       res.send(users);
     });
-    const { ObjectId } = require("mongodb");
-
-    app.patch("/users/role/:id", async (req, res) => {
-      try {
-        const { id } = req.params;
-        const { role } = req.body;
-        if (!role) {
-          return res.status(400).json({ message: "New role is required" });
+    // GET /api/users/role/:email
+    app.get("/users/role/:email",verifyFbToken,verifyAdmin,async (req, res) => {
+        const email = req.params.email;
+        try {
+          const user = await usersCollection.findOne({ email });
+          if (!user) {
+            return res
+              .status(404)
+              .send({ message: "User not found", role: null });
+          }
+          return res.status(200).send({ role: user.role });
+        } catch (error) {
+          console.error("Role check failed:", error);
+          return res.status(500).json({ message: "Server error", role: null });
         }
-        const result = await usersCollection.updateOne(
-          { _id: new ObjectId(id) },
-          { $set: { role } }
-        );
-        if (result.modifiedCount > 0) {
-          return res
-            .status(200)
-            .json({ message: `User role updated to ${role}` });
-        } else {
-          return res
-            .status(404)
-            .json({ message: "User not found or role unchanged" });
-        }
-      } catch (error) {
-        console.error("❌ Failed to update user role:", error);
-        return res.status(500).json({ message: "Internal server error" });
       }
-    });
+    );
+
+    app.patch("/users/role/:id",verifyFbToken,verifyAdmin,async (req, res) => {
+        try {
+          const { id } = req.params;
+          const { role } = req.body;
+          if (!role) {
+            return res.status(400).json({ message: "New role is required" });
+          }
+          const result = await usersCollection.updateOne(
+            { _id: new ObjectId(id) },
+            { $set: { role } }
+          );
+          if (result.modifiedCount > 0) {
+            return res
+              .status(200)
+              .json({ message: `User role updated to ${role}` });
+          } else {
+            return res
+              .status(404)
+              .json({ message: "User not found or role unchanged" });
+          }
+        } catch (error) {
+          console.error("❌ Failed to update user role:", error);
+          return res.status(500).json({ message: "Internal server error" });
+        }
+      }
+    );
 
     app.get("/parcels", async (req, res) => {
       try {
@@ -190,7 +215,7 @@ async function run() {
     });
     // Assuming Express and MongoDB are already connected
 
-    app.get("/riders/pending", async (req, res) => {
+    app.get("/riders/pending", verifyFbToken, verifyAdmin, async (req, res) => {
       try {
         const pendingRiders = await ridersCollection
           .find({ status: "pending" })
@@ -203,17 +228,22 @@ async function run() {
       }
     });
     // GET /api/riders?status=approved
-    app.get("/riders/approved", async (req, res) => {
-      const { status } = req.query;
-      try {
-        const query = status ? { status } : {};
-        const riders = await ridersCollection.find(query).toArray();
-        res.send(riders);
-      } catch (err) {
-        console.error("Failed to fetch riders:", err);
-        res.status(500).send({ error: "Internal Server Error" });
+    app.get(
+      "/riders/approved",
+      verifyFbToken,
+      verifyAdmin,
+      async (req, res) => {
+        const { status } = req.query;
+        try {
+          const query = status ? { status } : {};
+          const riders = await ridersCollection.find(query).toArray();
+          res.send(riders);
+        } catch (err) {
+          console.error("Failed to fetch riders:", err);
+          res.status(500).send({ error: "Internal Server Error" });
+        }
       }
-    });
+    );
     // Approve or cancel rider
     app.patch("/riders/status/:id", async (req, res) => {
       const { id } = req.params;
