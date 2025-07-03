@@ -38,7 +38,7 @@ async function run() {
     const paymentCollection = db.collection("payments");
     // firebase jwt middleware
     const verifyFbToken = async (req, res, next) => {
-      console.log("headers in middleware", req.headers.authorization);
+      // console.log("headers in middleware", req.headers.authorization);
       const authHeader = req.headers.authorization;
       if (!authHeader || !authHeader.startsWith("Bearer ")) {
         return res.status(401).send({ error: "Unauthorized: No token" });
@@ -98,7 +98,11 @@ async function run() {
       res.send(users);
     });
     // GET /api/users/role/:email
-    app.get("/users/role/:email",verifyFbToken,verifyAdmin,async (req, res) => {
+    app.get(
+      "/users/role/:email",
+      verifyFbToken,
+      verifyAdmin,
+      async (req, res) => {
         const email = req.params.email;
         try {
           const user = await usersCollection.findOne({ email });
@@ -114,8 +118,11 @@ async function run() {
         }
       }
     );
-
-    app.patch("/users/role/:id",verifyFbToken,verifyAdmin,async (req, res) => {
+    app.patch(
+      "/users/role/:id",
+      verifyFbToken,
+      verifyAdmin,
+      async (req, res) => {
         try {
           const { id } = req.params;
           const { role } = req.body;
@@ -141,15 +148,23 @@ async function run() {
         }
       }
     );
-
-    app.get("/parcels", async (req, res) => {
+    app.get("/parcels", verifyFbToken, async (req, res) => {
       try {
-        const { email } = req.query;
+        const { email, payment_status, delivery_status } = req.query;
         const filter = {};
+
         // If email is provided, filter by created_by field
         if (email) {
           filter.created_by = email;
         }
+        if (payment_status) {
+          filter.payment_status = payment_status;
+        }
+        if (delivery_status) {
+          filter.delivery_status = delivery_status;
+        }
+        console.log("parcel query:", req.query);
+        console.log("query:", filter);
         const parcels = await parcelCollection
           .find(filter)
           .sort({ createdAt: -1 }) // Newest first
@@ -159,7 +174,6 @@ async function run() {
         res.status(500).send({ error: "Internal Server Error" });
       }
     });
-
     // POST route to add parcel
     app.post("/parcels", async (req, res) => {
       try {
@@ -213,7 +227,21 @@ async function run() {
       const result = await ridersCollection.insertOne(ridersData);
       res.send(result);
     });
-    // Assuming Express and MongoDB are already connected
+    // GET /api/riders/assignable?district=Sunamganj
+    // GET /api/riders/match
+    app.get("/riders/match", async (req, res) => {
+      try {
+        const { senderDistrict, receiverDistrict } = req.query;
+        if (!senderDistrict || !receiverDistrict) {
+          return res.status(400).json({ message: "Missing district params" });
+        }
+        const matchedRiders = await ridersCollection.find({status: "approved",district: { $in: [senderDistrict, receiverDistrict] },}).toArray();
+        res.status(200).json(matchedRiders);
+      } catch (error) {
+        console.error("Failed to fetch riders:", error);
+        res.status(500).json({ message: "Server error" });
+      }
+    });
 
     app.get("/riders/pending", verifyFbToken, verifyAdmin, async (req, res) => {
       try {
