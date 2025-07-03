@@ -98,26 +98,21 @@ async function run() {
       res.send(users);
     });
     // GET /api/users/role/:email
-    app.get(
-      "/users/role/:email",
-      verifyFbToken,
-      verifyAdmin,
-      async (req, res) => {
-        const email = req.params.email;
-        try {
-          const user = await usersCollection.findOne({ email });
-          if (!user) {
-            return res
-              .status(404)
-              .send({ message: "User not found", role: null });
-          }
-          return res.status(200).send({ role: user.role });
-        } catch (error) {
-          console.error("Role check failed:", error);
-          return res.status(500).json({ message: "Server error", role: null });
+    app.get("/users/role/:email", verifyFbToken, async (req, res) => {
+      const email = req.params.email;
+      try {
+        const user = await usersCollection.findOne({ email });
+        if (!user) {
+          return res
+            .status(404)
+            .send({ message: "User not found", role: null });
         }
+        return res.status(200).send({ role: user.role });
+      } catch (error) {
+        console.error("Role check failed:", error);
+        return res.status(500).json({ message: "Server error", role: null });
       }
-    );
+    });
     app.patch(
       "/users/role/:id",
       verifyFbToken,
@@ -174,6 +169,28 @@ async function run() {
         res.status(500).send({ error: "Internal Server Error" });
       }
     });
+    // Example: app.js or wherever routes are defined
+
+    app.get("/parcels/pending-deliveries", async (req, res) => {
+      try {
+        const { riderEmail } = req.query;
+        if (!riderEmail) {
+          return res.status(400).json({ message: "riderEmail is required" });
+        }
+        const pendingDeliveries = await parcelCollection
+          .find({
+            riderEmail,
+            delivery_status: { $in: ["riders-assigned", "in-transit"] },
+          })
+          .sort({ creation_date: 1 }) // oldest first
+          .toArray();
+        res.status(200).send(pendingDeliveries);
+      } catch (error) {
+        console.error("Error fetching pending deliveries:", error);
+        res.status(500).json({ message: "Internal server error" });
+      }
+    });
+
     // POST route to add parcel
     app.post("/parcels", async (req, res) => {
       try {
@@ -188,9 +205,13 @@ async function run() {
     });
     app.patch("/parcels/assign", async (req, res) => {
       try {
-        const { parcelId, riderId,riderName,riderPhone, riderEmail} = req.body;
-        console.log(req.body)
-        if (!parcelId || !riderId) {return res.status(400).json({ message: "parcelId and riderId are required" });
+        const { parcelId, riderId, riderName, riderPhone, riderEmail } =
+          req.body;
+        console.log(req.body);
+        if (!parcelId || !riderId) {
+          return res
+            .status(400)
+            .json({ message: "parcelId and riderId are required" });
         }
         // Update parcel: delivery_status → in-transit
         const parcelUpdate = await parcelCollection.updateOne(
@@ -199,19 +220,25 @@ async function run() {
             $set: {
               delivery_status: "riders-assigned",
               assignedRiderId: riderId, // optional for future tracking
-              riderName,riderPhone, riderEmail
+              riderName,
+              riderPhone,
+              riderEmail,
             },
           }
         );
         // Update rider: status → in-delivery
         const riderUpdate = await ridersCollection.updateOne(
-            { _id: new ObjectId(riderId) },
-            { $set: { status: "in-delivery" } }
-          );
+          { _id: new ObjectId(riderId) },
+          { $set: { status: "in-delivery" } }
+        );
 
         if (parcelUpdate.modifiedCount > 0 && riderUpdate.modifiedCount > 0) {
-          return res.status(200).send({ message: "Rider assigned successfully" });
-        } else {return res.status(400).send({ message: "Assignment failed" });}
+          return res
+            .status(200)
+            .send({ message: "Rider assigned successfully" });
+        } else {
+          return res.status(400).send({ message: "Assignment failed" });
+        }
       } catch (error) {
         console.error("Error assigning rider:", error);
         return res.status(500).json({ message: "Internal server error" });
@@ -241,6 +268,29 @@ async function run() {
         res.status(500).json({ error: "Internal Server Error" });
       }
     });
+    // PATCH /api/parcels/:id/delivery-status
+    app.patch("/parcels/:id/delivery-status", async (req, res) => {
+      const parcelId = req.params.id;
+      const { newStatus } = req.body;
+      if (!newStatus) {
+        return res.status(400).json({ message: "newStatus is required" });
+      }
+      const result = await parcelCollection
+        .updateOne(
+          { _id: new ObjectId(parcelId) },
+          { $set: { delivery_status: newStatus } }
+        );
+      if (result.modifiedCount > 0) {
+        res
+          .status(200)
+          .json({ message: `Delivery status updated to "${newStatus}"` });
+      } else {
+        res
+          .status(404)
+          .json({ message: "Parcel not found or already updated" });
+      }
+    });
+
     // DELETE a parcel by ID
     app.delete("/parcels/:id", async (req, res) => {
       try {
