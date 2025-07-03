@@ -188,7 +188,7 @@ async function run() {
     });
     app.patch("/parcels/assign", async (req, res) => {
       try {
-        const { parcelId, riderId } = req.body;
+        const { parcelId, riderId,riderName,riderPhone, riderEmail} = req.body;
         console.log(req.body)
         if (!parcelId || !riderId) {return res.status(400).json({ message: "parcelId and riderId are required" });
         }
@@ -197,8 +197,9 @@ async function run() {
           { _id: new ObjectId(parcelId) },
           {
             $set: {
-              delivery_status: "in-transit",
+              delivery_status: "riders-assigned",
               assignedRiderId: riderId, // optional for future tracking
+              riderName,riderPhone, riderEmail
             },
           }
         );
