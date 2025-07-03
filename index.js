@@ -186,6 +186,37 @@ async function run() {
         res.status(500).json({ error: "Internal server error" });
       }
     });
+    app.patch("/parcels/assign", async (req, res) => {
+      try {
+        const { parcelId, riderId } = req.body;
+        console.log(req.body)
+        if (!parcelId || !riderId) {return res.status(400).json({ message: "parcelId and riderId are required" });
+        }
+        // Update parcel: delivery_status → in-transit
+        const parcelUpdate = await parcelCollection.updateOne(
+          { _id: new ObjectId(parcelId) },
+          {
+            $set: {
+              delivery_status: "in-transit",
+              assignedRiderId: riderId, // optional for future tracking
+            },
+          }
+        );
+        // Update rider: status → in-delivery
+        const riderUpdate = await ridersCollection.updateOne(
+            { _id: new ObjectId(riderId) },
+            { $set: { status: "in-delivery" } }
+          );
+
+        if (parcelUpdate.modifiedCount > 0 && riderUpdate.modifiedCount > 0) {
+          return res.status(200).send({ message: "Rider assigned successfully" });
+        } else {return res.status(400).send({ message: "Assignment failed" });}
+      } catch (error) {
+        console.error("Error assigning rider:", error);
+        return res.status(500).json({ message: "Internal server error" });
+      }
+    });
+
     app.get("/parcels/:id", async (req, res) => {
       try {
         const id = req.params.id;
@@ -235,7 +266,12 @@ async function run() {
         if (!senderDistrict || !receiverDistrict) {
           return res.status(400).json({ message: "Missing district params" });
         }
-        const matchedRiders = await ridersCollection.find({status: "approved",district: { $in: [senderDistrict, receiverDistrict] },}).toArray();
+        const matchedRiders = await ridersCollection
+          .find({
+            status: "approved",
+            district: { $in: [senderDistrict, receiverDistrict] },
+          })
+          .toArray();
         res.status(200).json(matchedRiders);
       } catch (error) {
         console.error("Failed to fetch riders:", error);
