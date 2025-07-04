@@ -60,11 +60,19 @@ async function run() {
       }
       next();
     };
+    const verifyRider = async (req, res, next) => {
+      const email = req.decoded.email;
+      const user = await usersCollection.findOne({ email });
+      if (!user || user.role !== "rider") {
+        return res.status(403).send({ message: "forbidden access, You are not Rider Rolled" });
+      }
+      next();
+    };
     const verifyAdmin = async (req, res, next) => {
       const email = req.decoded.email;
       const user = await usersCollection.findOne({ email });
       if (!user || user.role !== "admin") {
-        return res.status(403).send({ message: "forbidden access" });
+        return res.status(403).send({ message: "forbidden access. Not Admin Rolled" });
       }
       next();
     };
@@ -98,7 +106,7 @@ async function run() {
       res.send(users);
     });
     // GET /api/users/role/:email
-    app.get("/users/role/:email", verifyFbToken, async (req, res) => {
+    app.get("/users/role/:email", async (req, res) => {
       const email = req.params.email;
       try {
         const user = await usersCollection.findOne({ email });
@@ -113,11 +121,7 @@ async function run() {
         return res.status(500).json({ message: "Server error", role: null });
       }
     });
-    app.patch(
-      "/users/role/:id",
-      verifyFbToken,
-      verifyAdmin,
-      async (req, res) => {
+    app.patch("/users/role/:id",verifyFbToken,verifyAdmin,async (req, res) => {
         try {
           const { id } = req.params;
           const { role } = req.body;
@@ -169,9 +173,7 @@ async function run() {
         res.status(500).send({ error: "Internal Server Error" });
       }
     });
-    // Example: app.js or wherever routes are defined
-
-    app.get("/parcels/pending-deliveries", async (req, res) => {
+    app.get("/parcels/pending-deliveries",verifyFbToken,verifyRider, async (req, res) => {
       try {
         const { riderEmail } = req.query;
         if (!riderEmail) {
@@ -190,7 +192,24 @@ async function run() {
         res.status(500).json({ message: "Internal server error" });
       }
     });
-
+    app.get('/parcels/completed-deliveries',verifyFbToken,verifyRider, async (req, res) => {
+      try {
+        const { riderEmail } = req.query;
+        if (!riderEmail) {
+          return res.status(400).json({ message: "riderEmail is required" });
+        }
+        const deliveredParcels = await parcelCollection
+          .find({
+            riderEmail: riderEmail,
+            delivery_status: { $in: ["delivered", "delivered_service_center"] }
+          })
+          .toArray();
+        res.status(200).json(deliveredParcels);
+      } catch (error) {
+        console.error("Error fetching delivered parcels:", error);
+        res.status(500).json({ message: "Internal server error" });
+      }
+    });
     // POST route to add parcel
     app.post("/parcels", async (req, res) => {
       try {
@@ -244,7 +263,6 @@ async function run() {
         return res.status(500).json({ message: "Internal server error" });
       }
     });
-
     app.get("/parcels/:id", async (req, res) => {
       try {
         const id = req.params.id;
@@ -290,7 +308,6 @@ async function run() {
           .json({ message: "Parcel not found or already updated" });
       }
     });
-
     // DELETE a parcel by ID
     app.delete("/parcels/:id", async (req, res) => {
       try {
@@ -309,7 +326,6 @@ async function run() {
       const result = await ridersCollection.insertOne(ridersData);
       res.send(result);
     });
-    // GET /api/riders/assignable?district=Sunamganj
     // GET /api/riders/match
     app.get("/riders/match", async (req, res) => {
       try {
@@ -343,11 +359,7 @@ async function run() {
       }
     });
     // GET /api/riders?status=approved
-    app.get(
-      "/riders/approved",
-      verifyFbToken,
-      verifyAdmin,
-      async (req, res) => {
+    app.get("/riders/approved",verifyFbToken,verifyAdmin,async (req, res) => {
         const { status } = req.query;
         try {
           const query = status ? { status } : {};
