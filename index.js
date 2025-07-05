@@ -394,8 +394,6 @@ async function run() {
       }
     });
 
-
-
     app.post("/riders", async (req, res) => {
       const ridersData = req.body;
       const result = await ridersCollection.insertOne(ridersData);
@@ -469,26 +467,6 @@ async function run() {
         // console.log(updateUsersRole.modifiedCount);
       }
       res.send(result);
-    });
-
-    app.post("/tracking", async (req, res) => {
-      try {
-        const { trackingId, parcelId, status, location } = req.body;
-        const update = {
-          trackingId,
-          parcelId,
-          status,
-          location,
-          timestamp: new Date(),
-        };
-
-        const result = await db.collection("tracking").insertOne(update);
-        res.send(result);
-      } catch (error) {
-        res
-          .status(500)
-          .send({ message: "Failed to insert tracking update", error });
-      }
     });
 
     app.post("/payments", async (req, res) => {
