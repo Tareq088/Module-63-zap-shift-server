@@ -36,6 +36,8 @@ async function run() {
     const usersCollection = db.collection("users");
     const parcelCollection = db.collection("parcels");
     const paymentCollection = db.collection("payments");
+    const trackingsCollection = db.collection("trackings");
+
     // firebase jwt middleware
     const verifyFbToken = async (req, res, next) => {
       // console.log("headers in middleware", req.headers.authorization);
@@ -102,7 +104,6 @@ async function run() {
         .project({ email: 1, role: 1, createdAt: 1, lastLogin: 1 }) // only return needed fields
         .limit(10) // optional: limit for autocomplete
         .toArray();
-
       res.send(users);
     });
     // GET /api/users/role/:email
@@ -162,8 +163,8 @@ async function run() {
         if (delivery_status) {
           filter.delivery_status = delivery_status;
         }
-        console.log("parcel query:", req.query);
-        console.log("query:", filter);
+        // console.log("parcel query:", req.query);
+        // console.log("query:", filter);
         const parcels = await parcelCollection
           .find(filter)
           .sort({ createdAt: -1 }) // Newest first
@@ -214,7 +215,7 @@ async function run() {
     app.post("/parcels", async (req, res) => {
       try {
         const parcelData = req.body;
-        console.log(parcelData);
+        // console.log(parcelData);
         const result = await parcelCollection.insertOne(parcelData);
         res.status(201).send(result);
       } catch (error) {
@@ -226,7 +227,7 @@ async function run() {
       try {
         const { parcelId, riderId, riderName, riderPhone, riderEmail } =
           req.body;
-        console.log(req.body);
+        // console.log(req.body);
         if (!parcelId || !riderId) {
           return res
             .status(400)
@@ -290,13 +291,24 @@ async function run() {
     app.patch("/parcels/:id/delivery-status", async (req, res) => {
       const parcelId = req.params.id;
       const { newStatus } = req.body;
+      const updateDoc = {
+          delivery_status: newStatus 
+        }
+     
+        if(newStatus === "in-transit"){
+          updateDoc.pickedAt = new Date().toISOString(); 
+        }
+        if(newStatus === "delivered"){
+          updateDoc.deliveredAt = new Date().toISOString();
+        }
+      
       if (!newStatus) {
         return res.status(400).json({ message: "newStatus is required" });
       }
       const result = await parcelCollection
         .updateOne(
           { _id: new ObjectId(parcelId) },
-          { $set: { delivery_status: newStatus } }
+          { $set: updateDoc}
         );
       if (result.modifiedCount > 0) {
         res
@@ -308,6 +320,31 @@ async function run() {
           .json({ message: "Parcel not found or already updated" });
       }
     });
+    // PATCH /parcels/cashout/:id
+    app.patch('/parcels/cashout/:id', async (req, res) => {
+      const parcelId = req.params.id;
+      try {
+        const result = await db.collection('parcels').updateOne(
+          { _id: new ObjectId(parcelId), cashout: { $ne: true } }, // ✅ Allow only if not already cashed
+          {
+            $set: {
+              cashout: true,
+              cashoutTime: new Date() // optional: save timestamp
+            }
+          }
+        );
+
+        if (result.modifiedCount > 0) {
+          return res.status(200).json({ message: 'Parcel cashed out successfully' });
+        } else {
+          return res.status(400).json({ message: 'Already cashed out or not found' });
+        }
+      } catch (err) {
+        console.error(err);
+        res.status(500).json({ message: 'Server error' });
+      }
+    });
+
     // DELETE a parcel by ID
     app.delete("/parcels/:id", async (req, res) => {
       try {
@@ -321,6 +358,44 @@ async function run() {
         res.status(500).send({ message: "Internal server error" });
       }
     });
+    // POST tracking
+    app.post('/trackings', async (req, res) => {
+      try {
+        const { trackingId, status, details,updated_by } = req.body;
+
+        if (!trackingId || !status || !details ||!updated_by) {
+          return res.status(400).json({ message: "All fields are required" });
+        }
+        const newEvent = {
+          trackingId, status, details,updated_by,
+          timestamp: new Date(),
+        };
+        const result = await trackingsCollection.insertOne(newEvent);
+        res.status(201).json({ message: 'Tracking event recorded', insertedId: result.insertedId });
+      } catch (error) {
+        console.error('Error adding tracking event:', error);
+        res.status(500).json({ message: 'Server error' });
+      }
+    });
+
+    app.get('/tracking/:parcelId', async (req, res) => {
+      try {
+        const parcelId = req.params.parcelId;
+
+        const events = await trackingsCollection
+          .find({ parcelId: new ObjectId(parcelId) })
+          .sort({ createdAt: 1 })
+          .toArray();
+
+        res.status(200).json(events);
+      } catch (error) {
+        console.error('Error fetching tracking events:', error);
+        res.status(500).json({ message: 'Server error' });
+      }
+    });
+
+
+
     app.post("/riders", async (req, res) => {
       const ridersData = req.body;
       const result = await ridersCollection.insertOne(ridersData);
@@ -391,7 +466,7 @@ async function run() {
           userQuery,
           updateDoc
         );
-        console.log(updateUsersRole.modifiedCount);
+        // console.log(updateUsersRole.modifiedCount);
       }
       res.send(result);
     });
@@ -420,7 +495,7 @@ async function run() {
       try {
         const { parcelId, amount, created_by, payment_method, transaction_id } =
           req.body;
-        console.log(req.body);
+        // console.log(req.body);
         const paidAtTime = new Date();
         // 1. Update parcel: mark as paid and set paidAtTime
         const updateResult = await parcelCollection.updateOne(
