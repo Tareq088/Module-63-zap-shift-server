@@ -66,7 +66,9 @@ async function run() {
       const email = req.decoded.email;
       const user = await usersCollection.findOne({ email });
       if (!user || user.role !== "rider") {
-        return res.status(403).send({ message: "forbidden access, You are not Rider Rolled" });
+        return res
+          .status(403)
+          .send({ message: "forbidden access, You are not Rider Rolled" });
       }
       next();
     };
@@ -74,7 +76,9 @@ async function run() {
       const email = req.decoded.email;
       const user = await usersCollection.findOne({ email });
       if (!user || user.role !== "admin") {
-        return res.status(403).send({ message: "forbidden access. Not Admin Rolled" });
+        return res
+          .status(403)
+          .send({ message: "forbidden access. Not Admin Rolled" });
       }
       next();
     };
@@ -122,7 +126,11 @@ async function run() {
         return res.status(500).json({ message: "Server error", role: null });
       }
     });
-    app.patch("/users/role/:id",verifyFbToken,verifyAdmin,async (req, res) => {
+    app.patch(
+      "/users/role/:id",
+      verifyFbToken,
+      verifyAdmin,
+      async (req, res) => {
         try {
           const { id } = req.params;
           const { role } = req.body;
@@ -174,43 +182,55 @@ async function run() {
         res.status(500).send({ error: "Internal Server Error" });
       }
     });
-    app.get("/parcels/pending-deliveries",verifyFbToken,verifyRider, async (req, res) => {
-      try {
-        const { riderEmail } = req.query;
-        if (!riderEmail) {
-          return res.status(400).json({ message: "riderEmail is required" });
+    app.get(
+      "/parcels/pending-deliveries",
+      verifyFbToken,
+      verifyRider,
+      async (req, res) => {
+        try {
+          const { riderEmail } = req.query;
+          if (!riderEmail) {
+            return res.status(400).json({ message: "riderEmail is required" });
+          }
+          const pendingDeliveries = await parcelCollection
+            .find({
+              riderEmail,
+              delivery_status: { $in: ["riders-assigned", "in-transit"] },
+            })
+            .sort({ creation_date: 1 }) // oldest first
+            .toArray();
+          res.status(200).send(pendingDeliveries);
+        } catch (error) {
+          console.error("Error fetching pending deliveries:", error);
+          res.status(500).json({ message: "Internal server error" });
         }
-        const pendingDeliveries = await parcelCollection
-          .find({
-            riderEmail,
-            delivery_status: { $in: ["riders-assigned", "in-transit"] },
-          })
-          .sort({ creation_date: 1 }) // oldest first
-          .toArray();
-        res.status(200).send(pendingDeliveries);
-      } catch (error) {
-        console.error("Error fetching pending deliveries:", error);
-        res.status(500).json({ message: "Internal server error" });
       }
-    });
-    app.get('/parcels/completed-deliveries',verifyFbToken,verifyRider, async (req, res) => {
-      try {
-        const { riderEmail } = req.query;
-        if (!riderEmail) {
-          return res.status(400).json({ message: "riderEmail is required" });
+    );
+    app.get(
+      "/parcels/completed-deliveries",
+      verifyFbToken,
+      verifyRider,
+      async (req, res) => {
+        try {
+          const { riderEmail } = req.query;
+          if (!riderEmail) {
+            return res.status(400).json({ message: "riderEmail is required" });
+          }
+          const deliveredParcels = await parcelCollection
+            .find({
+              riderEmail: riderEmail,
+              delivery_status: {
+                $in: ["delivered", "delivered_service_center"],
+              },
+            })
+            .toArray();
+          res.status(200).json(deliveredParcels);
+        } catch (error) {
+          console.error("Error fetching delivered parcels:", error);
+          res.status(500).json({ message: "Internal server error" });
         }
-        const deliveredParcels = await parcelCollection
-          .find({
-            riderEmail: riderEmail,
-            delivery_status: { $in: ["delivered", "delivered_service_center"] }
-          })
-          .toArray();
-        res.status(200).json(deliveredParcels);
-      } catch (error) {
-        console.error("Error fetching delivered parcels:", error);
-        res.status(500).json({ message: "Internal server error" });
       }
-    });
+    );
     // POST route to add parcel
     app.post("/parcels", async (req, res) => {
       try {
@@ -287,29 +307,58 @@ async function run() {
         res.status(500).json({ error: "Internal Server Error" });
       }
     });
+    app.get("/parcels/delivery/status-summary", async (req, res) => {
+      try {
+        const { riderEmail } = req.query;
+
+        let query = {};
+        if (riderEmail) {
+          query.riderEmail = riderEmail;
+        }
+        const pipeline = [
+          { $match: query },
+          {
+            $group: {
+              _id: "$delivery_status",
+              count: { $sum: 1 },
+            },
+          },
+          {
+            $project: {
+              status: "$_id",
+              _id: 0,
+              count: 1,
+            },
+          },
+        ];
+        const result = await parcelCollection.aggregate(pipeline).toArray();
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ message: "Server Error", error });
+      }
+    });
     // PATCH /api/parcels/:id/delivery-status
     app.patch("/parcels/:id/delivery-status", async (req, res) => {
       const parcelId = req.params.id;
       const { newStatus } = req.body;
       const updateDoc = {
-          delivery_status: newStatus 
-        }
-     
-        if(newStatus === "in-transit"){
-          updateDoc.pickedAt = new Date().toISOString(); 
-        }
-        if(newStatus === "delivered"){
-          updateDoc.deliveredAt = new Date().toISOString();
-        }
-      
+        delivery_status: newStatus,
+      };
+
+      if (newStatus === "in-transit") {
+        updateDoc.pickedAt = new Date().toISOString();
+      }
+      if (newStatus === "delivered") {
+        updateDoc.deliveredAt = new Date().toISOString();
+      }
+
       if (!newStatus) {
         return res.status(400).json({ message: "newStatus is required" });
       }
-      const result = await parcelCollection
-        .updateOne(
-          { _id: new ObjectId(parcelId) },
-          { $set: updateDoc}
-        );
+      const result = await parcelCollection.updateOne(
+        { _id: new ObjectId(parcelId) },
+        { $set: updateDoc }
+      );
       if (result.modifiedCount > 0) {
         res
           .status(200)
@@ -321,27 +370,31 @@ async function run() {
       }
     });
     // PATCH /parcels/cashout/:id
-    app.patch('/parcels/cashout/:id', async (req, res) => {
+    app.patch("/parcels/cashout/:id", async (req, res) => {
       const parcelId = req.params.id;
       try {
-        const result = await db.collection('parcels').updateOne(
+        const result = await db.collection("parcels").updateOne(
           { _id: new ObjectId(parcelId), cashout: { $ne: true } }, // ✅ Allow only if not already cashed
           {
             $set: {
               cashout: true,
-              cashoutTime: new Date() // optional: save timestamp
-            }
+              cashoutTime: new Date(), // optional: save timestamp
+            },
           }
         );
 
         if (result.modifiedCount > 0) {
-          return res.status(200).json({ message: 'Parcel cashed out successfully' });
+          return res
+            .status(200)
+            .json({ message: "Parcel cashed out successfully" });
         } else {
-          return res.status(400).json({ message: 'Already cashed out or not found' });
+          return res
+            .status(400)
+            .json({ message: "Already cashed out or not found" });
         }
       } catch (err) {
         console.error(err);
-        res.status(500).json({ message: 'Server error' });
+        res.status(500).json({ message: "Server error" });
       }
     });
 
@@ -359,26 +412,34 @@ async function run() {
       }
     });
     // POST tracking
-    app.post('/trackings', async (req, res) => {
+    app.post("/trackings", async (req, res) => {
       try {
-        const { trackingId, status, details,updated_by } = req.body;
+        const { trackingId, status, details, updated_by } = req.body;
 
-        if (!trackingId || !status || !details ||!updated_by) {
+        if (!trackingId || !status || !details || !updated_by) {
           return res.status(400).json({ message: "All fields are required" });
         }
         const newEvent = {
-          trackingId, status, details,updated_by,
+          trackingId,
+          status,
+          details,
+          updated_by,
           timestamp: new Date(),
         };
         const result = await trackingsCollection.insertOne(newEvent);
-        res.status(201).json({ message: 'Tracking event recorded', insertedId: result.insertedId });
+        res
+          .status(201)
+          .json({
+            message: "Tracking event recorded",
+            insertedId: result.insertedId,
+          });
       } catch (error) {
-        console.error('Error adding tracking event:', error);
-        res.status(500).json({ message: 'Server error' });
+        console.error("Error adding tracking event:", error);
+        res.status(500).json({ message: "Server error" });
       }
     });
 
-    app.get('/tracking/:parcelId', async (req, res) => {
+    app.get("/tracking/:parcelId", async (req, res) => {
       try {
         const parcelId = req.params.parcelId;
 
@@ -389,8 +450,8 @@ async function run() {
 
         res.status(200).json(events);
       } catch (error) {
-        console.error('Error fetching tracking events:', error);
-        res.status(500).json({ message: 'Server error' });
+        console.error("Error fetching tracking events:", error);
+        res.status(500).json({ message: "Server error" });
       }
     });
 
@@ -432,7 +493,11 @@ async function run() {
       }
     });
     // GET /api/riders?status=approved
-    app.get("/riders/approved",verifyFbToken,verifyAdmin,async (req, res) => {
+    app.get(
+      "/riders/approved",
+      verifyFbToken,
+      verifyAdmin,
+      async (req, res) => {
         const { status } = req.query;
         try {
           const query = status ? { status } : {};
